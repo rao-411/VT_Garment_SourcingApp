@@ -1,0 +1,1 @@
+{"EXW": [], "FCA": ["Exwork(M)"], "FOB": ["Exwork(M)"], "CFR": ["Exwork(M)", "Freight(O)"], "CIF": ["Exwork(M)", "Freight(O)"], "CPT": ["Exwork(M)", "Freight(O)"], "DAP": ["Exwork(M)", "Freight(O)", "Local(Q)"], "DDP": ["Exwork(M)", "Freight(O)", "Local(Q)", "Brokerage(S)"]}
