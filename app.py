@@ -1,3 +1,4 @@
+# app.py
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -117,32 +118,34 @@ with tab1:
         st.dataframe(df_raw.head(5), use_container_width=True)
         
         if st.button("Run Sourcing Matrix Optimization", type="primary", key="btn_run_excel"):
-            with st.spinner("Executing structural XGBoost inference loops and evaluating capital degradation curves..."):
+            with st.spinner("Executing structural XGBoost inference loops and evaluating import costs..."):
                 try:
                     result_df = process_excel(df_raw, use_model=use_model)
                     st.success("Analysis Complete!")
                     
-                    total_pure_logistics = result_df['Predicted Pure Logistics Cost (Baht)'].sum()
-                    total_holding_costs = result_df['Calculated FV Holding Penalty (Baht)'].sum()
-                    total_landed_costs = result_df['Optimized Total Landed Cost (Baht)'].sum()
-                    simulated_moq_penalties = 30000.0 if len(result_df) > 1 else 0.0
+                    # Core aggregations aligned to backend output keys
+                    total_import_costs = result_df['Predicted Total Import Cost (Baht)'].sum()
+                    total_freight = result_df['Predicted Freight (Baht)'].sum()
+                    total_local = result_df['Predicted Local (Baht)'].sum()
+                    total_brokerage = result_df['Predicted Brokerage (Baht)'].sum()
                     
                     c1, c2, c3, c4 = st.columns(4)
-                    c1.metric("True Sourcing Cost (Landed)", f"THB {total_landed_costs + simulated_moq_penalties:,.2f}")
-                    c2.metric("Pure Shipping Costs", f"THB {total_pure_logistics:,.2f}")
-                    c3.metric("MOQ Penalties Accrued", f"THB {simulated_moq_penalties:,.2f}")
-                    c4.metric("Storage Carrying & WACC", f"THB {total_holding_costs:,.2f}")
+                    c1.metric("Predicted Total Import Cost", f"THB {total_import_costs:,.2f}")
+                    c2.metric("Total Predicted Freight", f"THB {total_freight:,.2f}")
+                    c3.metric("Total Local Costs", f"THB {total_local:,.2f}")
+                    c4.metric("Total Brokerage Costs", f"THB {total_brokerage:,.2f}")
                     
                     st.markdown("---")
                     st.subheader("Individual Shipment Ledger")
                     
+                    # Columns restructured to match actual keys assigned inside cost_predictor.py
                     presentation_cols = [
                         'Item', 'Vendor Name', 'Ship From', 'Fixed Syteline Incoterm', 
-                        'Recommended Ship Via', 'Container Assignment', 'Required Vehicle Load Count',
-                        'Predicted Exwork (Baht)', 'Predicted Freight (Baht)', 
-                        'Predicted Local (Baht)', 'Predicted Brokerage (Baht)',
-                        'Calculated FV Holding Penalty (Baht)', 'Optimized Total Landed Cost (Baht)'
+                        'Recommended Ship Via', 'Predicted Exwork (Baht)', 'Predicted Freight (Baht)', 
+                        'Predicted Local (Baht)', 'Predicted Brokerage (Baht)', 
+                        'Predicted Total Import Cost (Baht)'
                     ]
+                    
                     display_df = result_df[[c for c in presentation_cols if c in result_df.columns]]
                     st.dataframe(display_df, use_container_width=True)
                     
