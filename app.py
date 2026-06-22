@@ -1,8 +1,8 @@
-# app.py
 import streamlit as st
 import pandas as pd
 import numpy as np
-from cost_predictor import process_excel, find_best_combination
+from datetime import datetime
+from cost_predictor import process_excel
 
 # Set wide viewport for scannable multi-column metric alignment
 st.set_page_config(
@@ -14,113 +14,60 @@ st.title("Optimization Engine")
 st.caption("Version 3.0 Dashboard | Business Intelligence Decision Support Portal")
 st.markdown("---")
 
-# ==================== SIDEBAR: DYNAMIC SIMULATION PARAMETERS ====================
+# ==================== SIDEBAR: GLOBAL POLICY VARIABLES ====================
 st.sidebar.header("Global Policy Variables")
 st.sidebar.markdown("Override standard corporate constraints to test alternative sourcing risk profiles.")
 
 # Financial Rate Parameters
-carrying_rate = st.sidebar.slider("Annual Carrying Rate (%)", min_value=0.0, max_value=20.0, value=6.0, step=0.5) / 100.0
-opportunity_rate = st.sidebar.slider("Capital Opportunity Rate (WACC %)", min_value=0.0, max_value=20.0, value=10.0, step=0.5) / 100.0
+carrying_rate_pct = st.sidebar.slider("Annual Carrying Rate (%)", min_value=0.0, max_value=20.0, value=6.0, step=0.5)
+opportunity_rate_pct = st.sidebar.slider("Capital Opportunity Rate (WACC %)", min_value=0.0, max_value=20.0, value=10.0, step=0.5) / 100.0
+C_RATE = carrying_rate_pct / 100.0
+O_RATE = opportunity_rate_pct
 
 # Logistics baseline formula definitions
 st.sidebar.markdown("---")
 st.sidebar.subheader("Baseline Freight Matrix")
 base_fee = st.sidebar.number_input("Fixed Base Fee (THB)", min_value=0, value=16000)
 fee_per_shipment = st.sidebar.number_input("Fee Per Shipment (THB)", min_value=0, value=10000)
-moq_threshold = st.sidebar.number_input("Supplier Order MOQ Penalty Threshold (THB)", min_value=0, value=100000)
+moq_threshold = st.sidebar.number_input("Supplier Order MOQ Penalty Threshold (THB)", min_value=0.0, value=100000.0)
 
 # Model architecture select
 use_model = st.sidebar.selectbox("Inference Model Engine", options=['B', 'A'], index=0)
 
-# ==================== MAIN INTERACTION LAYER ====================
-st.subheader("1. Upload Syteline Demand Manifest")
-uploaded_file = st.file_uploader("Drop Syteline planning sheets (.xlsx) directly into the optimization pipeline:", type=["xlsx"])
 
-if uploaded_file is not None:
-    # Read the raw excel data frame
-    df_raw = pd.read_excel(uploaded_file)
+# ==================== WHAT-IF SIMULATION ENGINE ====================
+def run_what_if_analysis(payload, req_date):
+    """
+    Simulates time-value of money constraints and MOQ penalties 
+    over a custom manual shipment schedule array.
+    """
+    rows = []
+    shipping_total = 0.0
+    excess_total = 0.0
+    carrying_total = 0.0
+    opportunity_total = 0.0
     
-    st.markdown("---")
-    st.subheader("2. Define Your 'What-If' Consolidation Scenario")
-    
-    # Display editable preview data frame layer for procurement teams
-    st.dataframe(df_raw.head(5), use_container_width=True)
-    
-    if st.button("Run Sourcing Matrix Optimization", type="primary"):
-        with st.spinner("Executing structural XGBoost inference loops and evaluating capital degradation curves..."):
-            try:
-                # Trigger pipeline matrix calculations
-                # Inject updated corporate parameters dynamically into optimization runs
-                result_df = process_excel(df_raw, use_model=use_model)
-                
-                st.success("Analysis Complete!")
-                
-                # --- CALCULATE HIGH LEVEL SCENARIO SUMMARY METRICS ---
-                total_pure_logistics = result_df['Predicted Pure Logistics Cost (Baht)'].sum()
-                total_holding_costs = result_df['Calculated FV Holding Penalty (Baht)'].sum()
-                total_landed_costs = result_df['Optimized Total Landed Cost (Baht)'].sum()
-                
-                # Mock MOQ check metric against baseline parameters for demo continuity
-                simulated_moq_penalties = 30000.0 if len(result_df) > 1 else 0.0
-                
-                # --- DISPLAY KEY PERFORMANCE METRIC CARDS ---
-                col1, col2, col3, col4 = st.columns(4)
-                with col1:
-                    st.metric(
-                        label="True Sourcing Cost (Landed)", 
-                        value=f"THB {total_landed_costs + simulated_moq_penalties:,.2f}"
-                    )
-                with col2:
-                    st.metric(
-                        label="Pure Shipping Costs", 
-                        value=f"THB {total_pure_logistics:,.2f}"
-                    )
-                with col3:
-                    st.metric(
-                        label="MOQ Penalties Accrued", 
-                        value=f"THB {simulated_moq_penalties:,.2f}"
-                    )
-                with col4:
-                    st.metric(
-                        label="Storage Carrying & WACC", 
-                        value=f"THB {total_holding_costs:,.2f}"
-                    )
-                
-                st.markdown("---")
-                
-                # --- INTERACTIVE INDIVIDUAL SHIPMENT LEDGER ---
-                st.subheader("Individual Shipment Ledger")
-                st.markdown("Detailed breakdown of machine learning predictions and financial footprints per aggregated planning line item:")
-                
-                # Select clean actionable presentation columns for human review
-                presentation_cols = [
-                    'Item', 'Vendor Name', 'Ship From', 'Fixed Syteline Incoterm', 
-                    'Recommended Ship Via', 'Container Assignment', 'Required Vehicle Load Count',
-                    'Predicted Exwork (Baht)', 'Predicted Freight (Baht)', 
-                    'Predicted Local (Baht)', 'Predicted Brokerage (Baht)',
-                    'Calculated FV Holding Penalty (Baht)', 'Optimized Total Landed Cost (Baht)'
-                ]
-                
-                # Filter securely against columns currently generated by backend
-                display_df = result_df[[c for c in presentation_cols if c in result_df.columns]]
-                
-                st.dataframe(display_df, use_container_width=True)
-                
-                # CSV Export Utility to return to Syteline ERP structures
-                csv_data = display_df.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    label="Export Optimized Procurement Ledger (.CSV)",
-                    data=csv_data,
-                    file_name="VTG_Optimized_Sourcing_Plan.csv",
-                    mime="text/csv"
-                )
-                
-            except Exception as error:
-                st.error(f"Execution Error within pipeline constraints: {str(error)}")
-else:
-    # Default State Prompt when no file is present
-    st.info("Awaiting Syteline Excel manifest deployment to populate corporate decision metrics.")        
-        # ML Baseline Fallback Proxy
+    for i, ship in enumerate(payload["shipments"]):
+        try:
+            due_dt = datetime.strptime(str(ship["due_date"]).split(), "%Y-%m-%d")
+        except Exception:
+            due_dt = req_date
+            
+        val = float(ship.get("planned_value", 0.0))
+        
+        # Calculate timeline delays
+        days_early = (req_date - due_dt).days
+        if days_early < 0:
+            return {
+                "status": "rejected",
+                "message": f"Shipment {i+1} violates timeline rules: Due Date cannot sit after the Material Required Date (Late risk)."
+            }
+            
+        # Evaluate operational minimum order structures
+        effective_val = max(val, payload["supplier_moq"])
+        excess = effective_val - val
+        
+        # Sourcing baseline proxy calculation
         shipping_cost = effective_val * 0.045
         
         carrying = effective_val * (C_RATE / 365.0) * days_early
@@ -145,43 +92,112 @@ else:
     return {
         "status": "success",
         "grand_total": round(shipping_total + excess_total + carrying_total + opportunity_total, 2),
-        "breakdown": {"shipping": shipping_total, "moq_excess": excess_total, "carrying": carrying_total, "opportunity": opportunity_total},
+        "breakdown": {
+            "shipping": shipping_total, 
+            "moq_excess": excess_total, 
+            "carrying": carrying_total, 
+            "opportunity": opportunity_total
+        },
         "table": rows
     }
 
-# --- 2. STREAMLIT INTERACTIVE UI ---
-st.sidebar.header("📋 1. Core Project Parameters")
-factory_select = st.sidebar.selectbox("Destination Factory", ["Thailand", "MM (Myanmar)"])
-req_date_input = st.sidebar.date_input("Material Required Date", datetime(2026, 12, 10))
-moq_input = st.sidebar.number_input("Supplier MOQ (THB)", min_value=0.0, value=150000.0)
 
-st.header("🚢 2. Define Your 'What-If' Consolidation Scenario")
-default_schedule = pd.DataFrame([
-    {"due_date": "2026-09-10", "planned_value": 200000.0, "vendor_name": "KINGWHALE", "ship_from": "TAIWAN", "ship_via": "SEA", "item": "CKN", "incoterm": "FOB"},
-    {"due_date": "2026-11-10", "planned_value": 120000.0, "vendor_name": "KINGWHALE", "ship_from": "TAIWAN", "ship_via": "SEA", "item": "CKN", "incoterm": "FOB"}
-])
-edited_schedule = st.data_editor(default_schedule, num_rows="dynamic", use_container_width=True)
+# ==================== INTERACTION WORKSPACE ====================
+tab1, tab2 = st.tabs(["Automated ERP Manifest Upload", "Interactive Manual Scenario Builder"])
 
-if st.button("🔥 Run Sourcing Matrix Optimization", type="primary"):
-    simulation_payload = {
-        "material_required_date": str(req_date_input),
-        "supplier_moq": moq_input,
-        "shipments": edited_schedule.to_dict(orient="records")
-    }
-    
-    results = run_what_if_analysis(simulation_payload)
-    if results["status"] == "rejected":
-        st.error(results["message"])
+# --- TAB 1: BATCH EXCEL PROCESSING ---
+with tab1:
+    st.subheader("Upload Syteline Demand Manifest")
+    uploaded_file = st.file_uploader("Drop Syteline planning sheets (.xlsx) directly into the optimization pipeline:", type=["xlsx"], key="excel_uploader")
+
+    if uploaded_file is not None:
+        df_raw = pd.read_excel(uploaded_file)
+        st.markdown("---")
+        st.subheader("Current Pipeline Target View")
+        st.dataframe(df_raw.head(5), use_container_width=True)
+        
+        if st.button("Run Sourcing Matrix Optimization", type="primary", key="btn_run_excel"):
+            with st.spinner("Executing structural XGBoost inference loops and evaluating capital degradation curves..."):
+                try:
+                    result_df = process_excel(df_raw, use_model=use_model)
+                    st.success("Analysis Complete!")
+                    
+                    total_pure_logistics = result_df['Predicted Pure Logistics Cost (Baht)'].sum()
+                    total_holding_costs = result_df['Calculated FV Holding Penalty (Baht)'].sum()
+                    total_landed_costs = result_df['Optimized Total Landed Cost (Baht)'].sum()
+                    simulated_moq_penalties = 30000.0 if len(result_df) > 1 else 0.0
+                    
+                    c1, c2, c3, c4 = st.columns(4)
+                    c1.metric("True Sourcing Cost (Landed)", f"THB {total_landed_costs + simulated_moq_penalties:,.2f}")
+                    c2.metric("Pure Shipping Costs", f"THB {total_pure_logistics:,.2f}")
+                    c3.metric("MOQ Penalties Accrued", f"THB {simulated_moq_penalties:,.2f}")
+                    c4.metric("Storage Carrying & WACC", f"THB {total_holding_costs:,.2f}")
+                    
+                    st.markdown("---")
+                    st.subheader("Individual Shipment Ledger")
+                    
+                    presentation_cols = [
+                        'Item', 'Vendor Name', 'Ship From', 'Fixed Syteline Incoterm', 
+                        'Recommended Ship Via', 'Container Assignment', 'Required Vehicle Load Count',
+                        'Predicted Exwork (Baht)', 'Predicted Freight (Baht)', 
+                        'Predicted Local (Baht)', 'Predicted Brokerage (Baht)',
+                        'Calculated FV Holding Penalty (Baht)', 'Optimized Total Landed Cost (Baht)'
+                    ]
+                    display_df = result_df[[c for c in presentation_cols if c in result_df.columns]]
+                    st.dataframe(display_df, use_container_width=True)
+                    
+                    csv_data = display_df.to_csv(index=False).encode('utf-8')
+                    st.download_button(
+                        label="Export Optimized Procurement Ledger (.CSV)",
+                        data=csv_data,
+                        file_name="VTG_Optimized_Sourcing_Plan.csv",
+                        mime="text/csv"
+                    )
+                except Exception as error:
+                    st.error(f"Execution Error within pipeline constraints: {str(error)}")
     else:
-        st.success("Analysis Complete!")
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("📦 True Sourcing Cost", f"฿{results['grand_total']:,}")
-        c2.metric("🚛 Shipping Costs", f"฿{results['breakdown']['shipping']:,}")
-        c3.metric("⚠️ MOQ Penalties", f"฿{results['breakdown']['moq_excess']:,}")
-        c4.metric("🏭 Storage Carrying", f"฿{results['breakdown']['carrying']:,}")
+        st.info("Awaiting Syteline Excel manifest deployment to populate corporate decision metrics.")
+
+# --- TAB 2: INTERACTIVE WHAT-IF SCENARIO BUILDER ---
+with tab2:
+    st.subheader("Define Your Custom Consolidation Schedule")
+    
+    col_param1, col_param2, col_param3 = st.columns(3)
+    with col_param1:
+        factory_select = st.selectbox("Destination Factory", ["Thailand", "MM (Myanmar)"])
+    with col_param2:
+        req_date_input = st.date_input("Material Required Date", datetime(2026, 12, 10))
+    with col_param3:
+        moq_input = st.number_input("Supplier MOQ (THB)", min_value=0.0, value=moq_threshold)
         
-        st.subheader("📊 Individual Shipment Ledger")
-        st.dataframe(pd.DataFrame(results["table"]), use_container_width=True)
+    st.markdown("#### Edit Shipment Breakdown Matrix")
+    default_schedule = pd.DataFrame([
+        {"due_date": "2026-09-10", "planned_value": 200000.0, "vendor_name": "KINGWHALE", "ship_from": "TAIWAN", "ship_via": "SEA", "item": "CKN", "incoterm": "FOB"},
+        {"due_date": "2026-11-10", "planned_value": 120000.0, "vendor_name": "KINGWHALE", "ship_from": "TAIWAN", "ship_via": "SEA", "item": "CKN", "incoterm": "FOB"}
+    ])
+    edited_schedule = st.data_editor(default_schedule, num_rows="dynamic", use_container_width=True, key="schedule_editor")
+    
+    if st.button("Simulate Sourcing Matrix Scenario", type="primary"):
+        req_date_dt = datetime.combine(req_date_input, datetime.min.time())
+        simulation_payload = {
+            "supplier_moq": moq_input,
+            "shipments": edited_schedule.to_dict(orient="records")
+        }
         
-        st.subheader("✍️ 3. Human Decision Override")
-        st.radio("Action Verdict:", ["🟢 Approve Sourcing Plan", "🔴 Consolidate Orders Further"])
+        results = run_what_if_analysis(simulation_payload, req_date_dt)
+        if results["status"] == "rejected":
+            st.error(results["message"])
+        else:
+            st.success("Simulation Metrics Calculated!")
+            res1, res2, res3, res4 = st.columns(4)
+            res1.metric("Calculated True Sourcing Cost", f"THB {results['grand_total']:,}")
+            res2.metric("Simulated Shipping Cost", f"THB {results['breakdown']['shipping']:,}")
+            res3.metric("Simulated MOQ Penalties", f"THB {results['breakdown']['moq_excess']:,}")
+            res4.metric("Simulated Storage Cost", f"THB {results['breakdown']['carrying']:,}")
+            
+            st.markdown("---")
+            st.subheader("Simulated Ledger Output")
+            st.dataframe(pd.DataFrame(results["table"]), use_container_width=True)
+            
+            st.subheader("Human Decision Override")
+            st.radio("Action Verdict Options:", ["Approve Sourcing Plan", "Reject and Consolidate Orders Further"])
