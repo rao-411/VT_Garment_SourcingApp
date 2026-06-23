@@ -2,10 +2,10 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, date
 from cost_predictor import process_excel
 
-# Set wide viewport for scannable multi-column metric alignment
+# Set wide viewport
 st.set_page_config(
     page_title="VT Garment - Landed Cost Optimization Engine",
     layout="wide"
@@ -21,27 +21,24 @@ st.sidebar.markdown("Override standard corporate constraints to test alternative
 
 # Financial Rate Parameters
 carrying_rate_pct = st.sidebar.slider("Annual Carrying Rate (%)", min_value=0.0, max_value=20.0, value=6.0, step=0.5)
-opportunity_rate_pct = st.sidebar.slider("Capital Opportunity Rate (WACC %)", min_value=0.0, max_value=20.0, value=10.0, step=0.5) / 100.0
-C_RATE = carrying_rate_pct / 100.0
-O_RATE = opportunity_rate_pct
+opportunity_rate_pct = st.sidebar.slider("Capital Opportunity Rate (WACC %)", min_value=0.0, max_value=20.0, value=10.0, step=0.5)
 
-# Logistics baseline formula definitions
+C_RATE = carrying_rate_pct / 100.0
+O_RATE = opportunity_rate_pct / 100.0
+
+# Logistics baseline
 st.sidebar.markdown("---")
 st.sidebar.subheader("Baseline Freight Matrix")
 base_fee = st.sidebar.number_input("Fixed Base Fee (THB)", min_value=0, value=16000)
 fee_per_shipment = st.sidebar.number_input("Fee Per Shipment (THB)", min_value=0, value=10000)
 moq_threshold = st.sidebar.number_input("Supplier Order MOQ Penalty Threshold (THB)", min_value=0.0, value=100000.0)
 
-# Model architecture select
+# Model select
 use_model = st.sidebar.selectbox("Inference Model Engine", options=['B', 'A'], index=0)
-
 
 # ==================== WHAT-IF SIMULATION ENGINE ====================
 def run_what_if_analysis(payload, req_date):
-    """
-    Simulates time-value of money constraints and MOQ penalties 
-    over a custom manual shipment schedule array.
-    """
+    """Simulates time-value of money + MOQ penalties."""
     rows = []
     shipping_total = 0.0
     excess_total = 0.0
@@ -50,26 +47,31 @@ def run_what_if_analysis(payload, req_date):
     
     for i, ship in enumerate(payload["shipments"]):
         try:
-            due_dt = datetime.strptime(str(ship["due_date"]).split(), "%Y-%m-%d")
+            # Robust date parsing
+            due_str = str(ship.get("due_date", "")).strip()
+            if isinstance(due_str, date):
+                due_dt = datetime.combine(due_str, datetime.min.time())
+            else:
+                due_dt = datetime.strptime(due_str.split()[0], "%Y-%m-%d")
         except Exception:
             due_dt = req_date
             
         val = float(ship.get("planned_value", 0.0))
         
-        # Calculate timeline delays
+        # Timeline check
         days_early = (req_date - due_dt).days
         if days_early < 0:
             return {
                 "status": "rejected",
-                "message": f"Shipment {i+1} violates timeline rules: Due Date cannot sit after the Material Required Date (Late risk)."
+                "message": f"Shipment {i+1} violates timeline: Due Date cannot be after Material Required Date."
             }
             
-        # Evaluate operational minimum order structures
+        # MOQ
         effective_val = max(val, payload["supplier_moq"])
         excess = effective_val - val
         
-        # Sourcing baseline proxy calculation
-        shipping_cost = effective_val * 0.045
+        # Proxy costs (you can enhance this)
+        shipping_cost = effective_val * 0.045  # placeholder
         
         carrying = effective_val * (C_RATE / 365.0) * days_early
         opportunity = val * (O_RATE / 365.0) * days_early
@@ -102,50 +104,46 @@ def run_what_if_analysis(payload, req_date):
         "table": rows
     }
 
-
-# ==================== INTERACTION WORKSPACE ====================
+# ==================== MAIN UI ====================
 tab1, tab2 = st.tabs(["Automated ERP Manifest Upload", "Interactive Manual Scenario Builder"])
 
-# --- TAB 1: BATCH EXCEL PROCESSING ---
+# --- TAB 1: Excel Processing ---
 with tab1:
     st.subheader("Upload Syteline Demand Manifest")
-    uploaded_file = st.file_uploader("Drop Syteline planning sheets (.xlsx) directly into the optimization pipeline:", type=["xlsx"], key="excel_uploader")
+    uploaded_file = st.file_uploader("Drop Syteline planning sheets (.xlsx):", type=["xlsx"], key="excel_uploader")
 
     if uploaded_file is not None:
         df_raw = pd.read_excel(uploaded_file)
         st.markdown("---")
-        st.subheader("Current Pipeline Target View")
+        st.subheader("Preview")
         st.dataframe(df_raw.head(5), use_container_width=True)
         
-        if st.button("Run Sourcing Matrix Optimization", type="primary", key="btn_run_excel"):
-            with st.spinner("Executing structural XGBoost inference loops and evaluating import costs..."):
+        if st.button("Run Sourcing Matrix Optimization", type="primary"):
+            with st.spinner("Running XGBoost inference + cost optimization..."):
                 try:
                     result_df = process_excel(df_raw, use_model=use_model)
                     st.success("Analysis Complete!")
                     
-                    # Core aggregations aligned to backend output keys
-                    total_import_costs = result_df['Predicted Total Import Cost (Baht)'].sum()
-                    total_freight = result_df['Predicted Freight (Baht)'].sum()
-                    total_local = result_df['Predicted Local (Baht)'].sum()
-                    total_brokerage = result_df['Predicted Brokerage (Baht)'].sum()
+                    total_import = result_df.get('Predicted Total Import Cost (Baht)', pd.Series(0)).sum()
+                    total_freight = result_df.get('Predicted Freight (Baht)', pd.Series(0)).sum()
+                    total_local = result_df.get('Predicted Local (Baht)', pd.Series(0)).sum()
+                    total_brokerage = result_df.get('Predicted Brokerage (Baht)', pd.Series(0)).sum()
                     
                     c1, c2, c3, c4 = st.columns(4)
-                    c1.metric("Predicted Total Import Cost", f"THB {total_import_costs:,.2f}")
+                    c1.metric("Predicted Total Import Cost", f"THB {total_import:,.2f}")
                     c2.metric("Total Predicted Freight", f"THB {total_freight:,.2f}")
                     c3.metric("Total Local Costs", f"THB {total_local:,.2f}")
                     c4.metric("Total Brokerage Costs", f"THB {total_brokerage:,.2f}")
                     
                     st.markdown("---")
-                    st.subheader("Individual Shipment Ledger")
+                    st.subheader("Optimized Ledger")
                     
-                    # Columns restructured to match actual keys assigned inside cost_predictor.py
                     presentation_cols = [
                         'Item', 'Vendor Name', 'Ship From', 'Fixed Syteline Incoterm', 
                         'Recommended Ship Via', 'Predicted Exwork (Baht)', 'Predicted Freight (Baht)', 
                         'Predicted Local (Baht)', 'Predicted Brokerage (Baht)', 
                         'Predicted Total Import Cost (Baht)'
                     ]
-                    
                     display_df = result_df[[c for c in presentation_cols if c in result_df.columns]]
                     st.dataframe(display_df, use_container_width=True)
                     
@@ -156,24 +154,24 @@ with tab1:
                         file_name="VTG_Optimized_Sourcing_Plan.csv",
                         mime="text/csv"
                     )
-                except Exception as error:
-                    st.error(f"Execution Error within pipeline constraints: {str(error)}")
+                except Exception as e:
+                    st.error(f"Execution Error: {str(e)}")
     else:
-        st.info("Awaiting Syteline Excel manifest deployment to populate corporate decision metrics.")
+        st.info("Upload an Excel manifest to start optimization.")
 
-# --- TAB 2: INTERACTIVE WHAT-IF SCENARIO BUILDER ---
+# --- TAB 2: What-If Builder ---
 with tab2:
-    st.subheader("Define Your Custom Consolidation Schedule")
+    st.subheader("Custom Consolidation Schedule")
     
-    col_param1, col_param2, col_param3 = st.columns(3)
-    with col_param1:
+    col1, col2, col3 = st.columns(3)
+    with col1:
         factory_select = st.selectbox("Destination Factory", ["Thailand", "MM (Myanmar)"])
-    with col_param2:
-        req_date_input = st.date_input("Material Required Date", datetime(2026, 12, 10))
-    with col_param3:
+    with col2:
+        req_date_input = st.date_input("Material Required Date", date(2026, 12, 10))
+    with col3:
         moq_input = st.number_input("Supplier MOQ (THB)", min_value=0.0, value=moq_threshold)
         
-    st.markdown("#### Edit Shipment Breakdown Matrix")
+    st.markdown("#### Shipment Breakdown (edit/add rows)")
     default_schedule = pd.DataFrame([
         {"due_date": "2026-09-10", "planned_value": 200000.0, "vendor_name": "KINGWHALE", "ship_from": "TAIWAN", "ship_via": "SEA", "item": "CKN", "incoterm": "FOB"},
         {"due_date": "2026-11-10", "planned_value": 120000.0, "vendor_name": "KINGWHALE", "ship_from": "TAIWAN", "ship_via": "SEA", "item": "CKN", "incoterm": "FOB"}
@@ -191,16 +189,11 @@ with tab2:
         if results["status"] == "rejected":
             st.error(results["message"])
         else:
-            st.success("Simulation Metrics Calculated!")
+            st.success("Simulation Complete!")
             res1, res2, res3, res4 = st.columns(4)
-            res1.metric("Calculated True Sourcing Cost", f"THB {results['grand_total']:,}")
-            res2.metric("Simulated Shipping Cost", f"THB {results['breakdown']['shipping']:,}")
-            res3.metric("Simulated MOQ Penalties", f"THB {results['breakdown']['moq_excess']:,}")
-            res4.metric("Simulated Storage Cost", f"THB {results['breakdown']['carrying']:,}")
+            res1.metric("True Sourcing Cost", f"THB {results['grand_total']:,.2f}")
+            res2.metric("Shipping Cost", f"THB {results['breakdown']['shipping']:,.2f}")
+            res3.metric("MOQ Penalties", f"THB {results['breakdown']['moq_excess']:,.2f}")
+            res4.metric("Storage Cost", f"THB {results['breakdown']['carrying']:,.2f}")
             
-            st.markdown("---")
-            st.subheader("Simulated Ledger Output")
             st.dataframe(pd.DataFrame(results["table"]), use_container_width=True)
-            
-            st.subheader("Human Decision Override")
-            st.radio("Action Verdict Options:", ["Approve Sourcing Plan", "Reject and Consolidate Orders Further"])
